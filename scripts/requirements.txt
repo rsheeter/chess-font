@@ -1,0 +1,4 @@
+fonttools>=4.50.0
+glyphsLib>=6.9.0
+picosvg>=0.22.0
+skia-pathops>=0.8.0
