@@ -42,7 +42,7 @@ _X_HEIGHT = 500
 _ADVANCE_WIDTH = 1000
 
 _DEFAULT_GRADE = 400
-_GRADE_RANGE = 200
+_GRADE_RANGE = 300
 
 _SAFE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _PX_UNIT_RE = re.compile(r"(\d)px\b")
@@ -54,6 +54,12 @@ _MAX_MITER_SCALE = 1.6
 # Contours with bounding-box area below this threshold (in font units^2) are
 # treated as Category C filigree/accents rather than Category A main silhouettes.
 _ACCENT_AREA_THRESHOLD = 4500.0
+# Maximum fraction of opposing-wall raycast clearance a single wall may traverse
+# (0.40 on each of two opposing walls leaves >= 20% minimum stroke/slit width).
+_MAX_CLEARANCE_FRACTION = 0.40
+# Minimum allowed chord projection ratio after vertex displacement to prevent
+# short curve/line segments from pinching or flipping orientation.
+_MIN_CHORD_PROJECTION = 0.25
 
 
 Point = tuple[float, float]
@@ -103,6 +109,14 @@ class Contour(NamedTuple):
 
     start: Point
     segments: tuple[CubicSegment, ...]
+
+
+class ClearanceSegment(NamedTuple):
+    """A linearized contour segment with its outward unit normal for raycasting."""
+
+    p0: Point
+    p1: Point
+    normal: Point
 
 
 # Standard Unicode Miscellaneous Symbols chess block (U+2654..U+265F).
@@ -188,14 +202,14 @@ _COMPONENT_GLYPHS: tuple[ComponentSpec, ...] = (
 #   dark backgrounds, positive grade on low-contrast or small sizes)
 #
 # We place the unmodified upstream SVG vectors at 400 (matching Regular weight)
-# and span +/- 200 units across three duplexed masters (200, 400, 600), all
+# and span +/- 300 units across three duplexed masters (100, 400, 700), all
 # locked to `_ADVANCE_WIDTH` (1000 UPM).
 _MASTERS: tuple[MasterSpec, ...] = (
     MasterSpec(
         master_id="master-thin",
         name="Thin Grade",
         grade_value=_DEFAULT_GRADE - _GRADE_RANGE,
-        grade_delta=-12.0,
+        grade_delta=-24.0,
     ),
     MasterSpec(
         master_id="master-regular",
@@ -207,7 +221,7 @@ _MASTERS: tuple[MasterSpec, ...] = (
         master_id="master-thick",
         name="Thick Grade",
         grade_value=_DEFAULT_GRADE + _GRADE_RANGE,
-        grade_delta=12.0,
+        grade_delta=26.0,
     ),
 )
 
@@ -487,16 +501,80 @@ def _incoming_tangent(p0: Point, seg: CubicSegment) -> Point:
     return _unit_vec(seg.end[0] - p0[0], seg.end[1] - p0[1])
 
 
+def _build_clearance_segments(
+    classified: list[tuple[Contour, ContourCategory]],
+) -> tuple[ClearanceSegment, ...]:
+    """Linearizes all contours into segments with right-hand outward unit normals."""
+    segs: list[ClearanceSegment] = []
+    for contour, _ in classified:
+        pts = _contour_polygon(contour)
+        m = len(pts)
+        for i in range(m):
+            p0 = pts[i]
+            p1 = pts[(i + 1) % m]
+            tx, ty = _unit_vec(p1[0] - p0[0], p1[1] - p0[1])
+            if (tx, ty) == (0.0, 0.0):
+                continue
+            # Right-hand normal (ty, -tx) points outward from black ink for both
+            # CCW outer silhouettes and CW inner counters.
+            segs.append(ClearanceSegment(p0=p0, p1=p1, normal=(ty, -tx)))
+    return tuple(segs)
+
+
+def _ray_opposing_clearance(
+    origin: Point,
+    direction: Point,
+    outward_normal: Point,
+    clearance_segs: tuple[ClearanceSegment, ...],
+) -> float:
+    """Returns distance along `direction` to the nearest opposing contour wall."""
+    ux, uy = direction
+    if (ux, uy) == (0.0, 0.0):
+        return float("inf")
+    ox, oy = origin
+    nx, ny = outward_normal
+    min_t = float("inf")
+
+    for seg in clearance_segs:
+        # Only consider walls whose outward normal opposes our outward normal
+        # (i.e. the opposite side of a stroke in Thin, or the opposite side of a
+        # counter/gap in Thick) and that face against the ray direction.
+        if (nx * seg.normal[0] + ny * seg.normal[1]) > -0.20:
+            continue
+
+        ax, ay = seg.p0
+        bx, by = seg.p1
+        sx = bx - ax
+        sy = by - ay
+        denom = ux * sy - uy * sx
+        if abs(denom) < 1e-9:
+            continue
+
+        wx = ax - ox
+        wy = ay - oy
+        t = (wx * sy - wy * sx) / denom
+        if t <= 2.0 or t >= min_t:
+            continue
+        u = (wx * uy - wy * ux) / denom
+        if 0.0 <= u <= 1.0:
+            min_t = t
+
+    return min_t
+
+
 def _grade_contour(
     contour: Contour,
     category: ContourCategory,
     grade_delta: float,
     glyph_center: Point,
+    clearance_segs: tuple[ClearanceSegment, ...],
 ) -> Contour:
     """Applies the Section 5 hybrid parametric Grade transformation to `contour`.
 
     Guarantees identical segment count, node types, and start node ordering
-    across all Grade masters so variable font interpolation never mismatches.
+    across all Grade masters so variable font interpolation never mismatches,
+    while clamping displacements against opposing-wall raycast clearance and
+    preventing short-chord inversions at extreme Thin/Thick grades.
     """
     if abs(grade_delta) < 1e-6:
         return contour
@@ -505,12 +583,14 @@ def _grade_contour(
     # On-curve anchors: anchors[0] == contour.start, anchors[k] == segments[k-1].end.
     anchors: list[Point] = [contour.start] + [seg.end for seg in contour.segments[:-1]]
 
-    # Compute outward-pointing normal at each on-curve anchor.
-    # For a counter-clockwise outer contour in +Y-up coordinates, the right-hand
-    # normal (ty, -tx) points outward from the filled black ink region.
-    # For a clockwise inner counter, (ty, -tx) points inward into the hole
-    # (which also thickens the surrounding black stroke when grade_delta > 0).
-    shifted_anchors: list[Point] = []
+    # Per-contour bounding box minor dimension for counter collapse protection.
+    xs = [p[0] for p in anchors]
+    ys = [p[1] for p in anchors]
+    minor_dim = max(1.0, min(max(xs) - min(xs), max(ys) - min(ys)))
+
+    raw_displacements: list[Point] = []
+    outward_normals: list[Point] = []
+
     for i, anchor in enumerate(anchors):
         prev_anchor = anchors[(i - 1) % n]
         prev_seg = contour.segments[(i - 1) % n]
@@ -529,6 +609,7 @@ def _grade_contour(
             nx, ny = n_out
         else:
             nx, ny = avg_nx / norm_len, avg_ny / norm_len
+        outward_normals.append((nx, ny))
 
         # Angle cap clipping (Section 5C): clamp miter projection on sharp corners.
         dot = max(-1.0, min(1.0, t_in[0] * t_out[0] + t_in[1] * t_out[1]))
@@ -540,22 +621,96 @@ def _grade_contour(
             miter_scale = min(_MAX_MITER_SCALE, 1.0 / max(half_sin, 0.5))
 
         if category == "silhouette":
-            # Category A: Asymmetric offset (+X horizontal, +0.5X vertical).
+            # Category A: Outer silhouette (+X horizontal, +0.65X vertical).
             dx = grade_delta * miter_scale * nx
-            dy = 0.5 * grade_delta * miter_scale * ny
+            dy = 0.65 * grade_delta * miter_scale * ny
         elif category == "counter":
-            # Category B: Suppress offset on internal counters so holes don't choke.
-            dx = 0.35 * grade_delta * miter_scale * nx
-            dy = 0.35 * grade_delta * miter_scale * ny
+            # Category B: Inner counters damped and clamped to minor_dim so
+            # narrow interior slits never collapse at extreme Thick grade.
+            counter_delta = grade_delta * 0.45
+            if counter_delta > 0.0:
+                counter_delta = min(counter_delta, 0.35 * minor_dim)
+            dx = counter_delta * miter_scale * nx
+            dy = counter_delta * miter_scale * ny
         else:
             # Category C: Minimal dilation + slight radial translation from center.
+            accent_delta = grade_delta * 0.25
+            if accent_delta < 0.0:
+                accent_delta = max(accent_delta, -0.32 * minor_dim)
             radial_x, radial_y = _unit_vec(
                 anchor[0] - glyph_center[0], anchor[1] - glyph_center[1]
             )
-            dx = 0.25 * grade_delta * nx + 0.15 * grade_delta * radial_x
-            dy = 0.25 * grade_delta * ny + 0.15 * grade_delta * radial_y
+            dx = accent_delta * nx + 0.12 * grade_delta * radial_x
+            dy = accent_delta * ny + 0.12 * grade_delta * radial_y
 
-        shifted_anchors.append((anchor[0] + dx, anchor[1] + dy))
+        # Clamp displacement magnitude against opposing-wall raycast clearance.
+        disp_mag = math.hypot(dx, dy)
+        if disp_mag > 1e-6 and category in ("silhouette", "counter"):
+            dir_vec = (dx / disp_mag, dy / disp_mag)
+            clearance = _ray_opposing_clearance(
+                anchor, dir_vec, (nx, ny), clearance_segs
+            )
+            max_allowed = _MAX_CLEARANCE_FRACTION * clearance
+            if disp_mag > max_allowed:
+                scale = max_allowed / disp_mag
+                dx *= scale
+                dy *= scale
+
+        raw_displacements.append((dx, dy))
+
+    # Smooth displacement vectors along the contour so adjacent anchors transition
+    # gradually when local clearance clamps kick in.
+    displacements = list(raw_displacements)
+    if n >= 3:
+        for _ in range(2):
+            displacements = [
+                (
+                    0.20 * displacements[(i - 1) % n][0]
+                    + 0.60 * displacements[i][0]
+                    + 0.20 * displacements[(i + 1) % n][0],
+                    0.20 * displacements[(i - 1) % n][1]
+                    + 0.60 * displacements[i][1]
+                    + 0.20 * displacements[(i + 1) % n][1],
+                )
+                for i in range(n)
+            ]
+
+    # Prevent short segments from pinching or flipping orientation when adjacent
+    # anchors converge around tight curvature radii.
+    for _ in range(3):
+        for i in range(n):
+            j = (i + 1) % n
+            vx = anchors[j][0] - anchors[i][0]
+            vy = anchors[j][1] - anchors[i][1]
+            len_sq = vx * vx + vy * vy
+            if len_sq < 1e-6:
+                continue
+            ddx = displacements[j][0] - displacements[i][0]
+            ddy = displacements[j][1] - displacements[i][1]
+            proj = 1.0 + (vx * ddx + vy * ddy) / len_sq
+            if proj < _MIN_CHORD_PROJECTION:
+                # Blend endpoint displacements toward their mean so the chord
+                # translates without shrinking below _MIN_CHORD_PROJECTION.
+                denom = vx * ddx + vy * ddy
+                alpha = max(
+                    0.0,
+                    (1.0 - _MIN_CHORD_PROJECTION) * len_sq / (-denom),
+                )
+                mid_dx = 0.5 * (displacements[i][0] + displacements[j][0])
+                mid_dy = 0.5 * (displacements[i][1] + displacements[j][1])
+                displacements[i] = (
+                    mid_dx - 0.5 * alpha * ddx,
+                    mid_dy - 0.5 * alpha * ddy,
+                )
+                displacements[j] = (
+                    mid_dx + 0.5 * alpha * ddx,
+                    mid_dy + 0.5 * alpha * ddy,
+                )
+
+    shifted_anchors: list[Point] = [
+        (anchors[i][0] + displacements[i][0], anchors[i][1] + displacements[i][1])
+        for i in range(n)
+    ]
 
     # Rebuild segments with Handle Ratio Preservation (Section 5C).
     new_segments: list[CubicSegment] = []
@@ -571,7 +726,7 @@ def _grade_contour(
             old_chord = math.hypot(p1_old[0] - p0_old[0], p1_old[1] - p0_old[1])
             new_chord = math.hypot(p1_new[0] - p0_new[0], p1_new[1] - p0_new[1])
             if old_chord > 1e-4:
-                ratio = max(0.5, min(1.5, new_chord / old_chord))
+                ratio = max(0.35, min(1.6, new_chord / old_chord))
             else:
                 ratio = 1.0
 
@@ -684,6 +839,7 @@ def build_source_for_set(set_dir: Path, out_path: Path) -> None:
         ink = _svg_to_ink_path(svg_path)
         raw_contours = _extract_cubic_contours(ink)
         classified = _normalize_and_classify_contours(raw_contours)
+        clearance_segs = _build_clearance_segments(classified)
 
         glyph = GSGlyph(piece.glyph_name)
         glyph.unicode = f"{piece.codepoint:04X}"
@@ -695,7 +851,13 @@ def build_source_for_set(set_dir: Path, out_path: Path) -> None:
             layer.width = _ADVANCE_WIDTH
 
             graded_contours = [
-                _grade_contour(contour, category, master_spec.grade_delta, glyph_center)
+                _grade_contour(
+                    contour,
+                    category,
+                    master_spec.grade_delta,
+                    glyph_center,
+                    clearance_segs,
+                )
                 for contour, category in classified
             ]
             _draw_contours_to_layer(graded_contours, layer)

@@ -2,8 +2,12 @@
 I was curious what's involved in creating a chess font :)
 
 For each major permissively licensed set of vector chess assets I could find we create a Unicode font using the standard Chess block:
-* 12 base piece glyphs (`U+2654`–`U+265F`, Miscellaneous Symbols) across 3 duplexed `GRAD` masters (`200`, `400`, `600`)
+* 12 base piece glyphs (`U+2654`–`U+265F`, Miscellaneous Symbols) across 3 duplexed `GRAD` masters (`100`, `400`, `700`)
 * 44 rotated/turned Unicode Chess Symbols (`U+1FA06`–`U+1FA46`) defined as transformed component references (`GSComponent`)
+
+Gemini did all the work, I just nudged it in the desired direction.
+
+[Live Demo (GitHub Pages)](https://rsheeter.github.io/chess-font/)
 
 ## Creation process
 
@@ -17,9 +21,16 @@ $ pip install -r scripts/requirements.txt
 
 1. `python3 scripts/vendor_glyphs.py` - update `third_party/` vendored SVG assets and [`third_party/README.md`](third_party/README.md)
 2. `python3 scripts/make_source.py` - establish `sources/<set>.glyphs` for each vendored SVG set
+    * Generates grade variants as described in [./grade-generation.md](./grade-generation.md)
 3. Edit in Glyphs
-    * **Not currently done**
+    * _In theory, currently just uses generated glyphs_
 4. `python3 scripts/build_fonts.py` - download the latest [`googlefonts/fontc`](https://github.com/googlefonts/fontc) release binary for the current OS/arch and compile `sources/<set>.glyphs` into `build/fonts/<set>.ttf`
+5. Test the [`docs/index.html`](docs/index.html) demo page locally (deployed automatically to GitHub Pages via [`.github/workflows/pages.yml`](.github/workflows/pages.yml)):
+    ```shell
+    $ python3 scripts/build_fonts.py --dest docs/fonts
+    $ python3 -m http.server -d docs 8000
+    ```
+    Then open `http://localhost:8000`.
 
 ## Technical Transcript: Engineering a High-Quality Variable Chess Font with a Grade (GRAD) Axis
 
