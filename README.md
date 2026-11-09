@@ -1,14 +1,25 @@
 # chess-font
-Curious what's involved in creating a chess font :)
+I was curious what's involved in creating a chess font :)
 
-## Font creation process
+For each major permissively licensed set of vector chess assets I could find we create a Unicode font using the standard Chess block:
+* 12 base piece glyphs (`U+2654`–`U+265F`, Miscellaneous Symbols) across 3 duplexed `GRAD` masters (`200`, `400`, `600`)
+* 44 rotated/turned Unicode Chess Symbols (`U+1FA06`–`U+1FA46`) defined as transformed component references (`GSComponent`)
 
-0. `pip install -r scripts/requirements.txt` - install Python dependencies for the build scripts ([`scripts/requirements.txt`](scripts/requirements.txt))
+## Creation process
+
+Before any python operation establish a virtual environment:
+
+```shell
+$ python3 -m venv .venv
+$ source .venv/bin/activate
+$ pip install -r scripts/requirements.txt
+```
+
 1. `python3 scripts/vendor_glyphs.py` - update `third_party/` vendored SVG assets and [`third_party/README.md`](third_party/README.md)
 2. `python3 scripts/make_source.py` - establish `sources/<set>.glyphs` for each vendored SVG set
 3. Edit in Glyphs
-    * Not currently done
-4. Compile with fontc
+    * **Not currently done**
+4. `python3 scripts/build_fonts.py` - download the latest [`googlefonts/fontc`](https://github.com/googlefonts/fontc) release binary for the current OS/arch and compile `sources/<set>.glyphs` into `build/fonts/<set>.ttf`
 
 ## Technical Transcript: Engineering a High-Quality Variable Chess Font with a Grade (GRAD) Axis
 
@@ -108,10 +119,10 @@ Graded Dark:    [ BISHOP GLYPH ]    -> Thickens internal strokes, advance width 
 
 ### 4. The Engineering Pipeline: Automated Multi-Master Compilation
 
-To build a variable chess font programmatically, we normalize the vendored SVGs into monochrome ink contours and emit multi-master `.glyphs` sources via [`scripts/make_source.py`](scripts/make_source.py):
+To build a variable chess font programmatically, we normalize the vendored SVGs into monochrome ink contours, emit multi-master `.glyphs` sources via [`scripts/make_source.py`](scripts/make_source.py), and compile them with [`googlefonts/fontc`](https://github.com/googlefonts/fontc) via [`scripts/build_fonts.py`](scripts/build_fonts.py):
 
 ```text
-[third_party/glyphs/<set>/*.svg] ➔ picosvg + skia-pathops ➔ scripts/make_source.py ➔ [sources/<set>.glyphs] ➔ Glyphs App / fontmake
+[third_party/glyphs/<set>/*.svg] ➔ picosvg + skia-pathops ➔ scripts/make_source.py ➔ [sources/<set>.glyphs] ➔ scripts/build_fonts.py (fontc) ➔ [build/fonts/<set>.ttf]
 ```
 
 #### The Toolchain Structure
@@ -119,12 +130,12 @@ To build a variable chess font programmatically, we normalize the vendored SVGs 
     *   Flattens SVG primitives (`<circle>`, `<rect>`), transforms, and strokes (`stroke-width`, `stroke-linecap`, `stroke-linejoin`) into explicit `<path>` outlines.
 2.  **Monochrome Boolean Resolution (`skia-pathops`):**
     *   Iterates through normalized paths in SVG paint order, applying boolean `UNION` for dark ink paths and `DIFFERENCE` for white/light knockout fills (`#fff`, `#ececec`, Merida highlight gradients) to produce self-intersection-free monochrome contours.
-3.  **Coordinate & Curve Conversion (`fontTools`):**
+3.  **Coordinate & Curve Conversion (`picosvg` + `fontTools`):**
     *   Maps the SVG `viewBox` into the `1000` UPM font em-box (`ascender = 800`, `descender = -200`) and elevates any quadratic Bézier segments to cubic Béziers.
 4.  **Multi-Master `.glyphs` Source Construction (`glyphsLib`):**
     *   Builds a native Glyphs 3 source (`sources/<set>.glyphs`) defining the `GRAD` axis centered at `400` (`Regular Grade` with the initial glyphs) and spanning `±200` (`Thin Grade` at `200`, `Thick Grade` at `600`) with locked `1000`-unit advance widths for `U+2654`–`U+265F`.
-5.  **Optical Polish & Compilation (`Glyphs App` / `fontmake`):**
-    *   Can be opened directly in Glyphs App for optical refinement or compiled via `fontmake -g sources/<set>.glyphs -o variable`.
+5.  **Optical Polish & Compilation (`Glyphs App` / [`fontc`](https://github.com/googlefonts/fontc)):**
+    *   Can be opened directly in Glyphs App for optical refinement, and compiled to variable `.ttf` binaries (`build/fonts/<set>.ttf`) via [`scripts/build_fonts.py`](scripts/build_fonts.py).
 
 ---
 

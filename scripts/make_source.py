@@ -20,8 +20,14 @@ from pathlib import Path
 import re
 from typing import Literal, NamedTuple
 
-from fontTools.pens.recordingPen import RecordingPen
-from glyphsLib.classes import GSAxis, GSFont, GSFontMaster, GSGlyph, GSLayer
+from glyphsLib.classes import (
+    GSAxis,
+    GSComponent,
+    GSFont,
+    GSFontMaster,
+    GSGlyph,
+    GSLayer,
+)
 import pathops
 from picosvg import svg_pathops
 from picosvg.svg import SVG
@@ -60,6 +66,16 @@ class PieceSpec(NamedTuple):
     stem: str
     glyph_name: str
     codepoint: int
+    description: str
+
+
+class ComponentSpec(NamedTuple):
+    """A glyph defined as a rotated component reference to a base piece."""
+
+    glyph_name: str
+    codepoint: int
+    base_glyph: str
+    cw_degrees: float
     description: str
 
 
@@ -103,6 +119,63 @@ _PIECES: tuple[PieceSpec, ...] = (
     PieceSpec("bb", "uni265D", 0x265D, "BLACK CHESS BISHOP"),
     PieceSpec("bn", "uni265E", 0x265E, "BLACK CHESS KNIGHT"),
     PieceSpec("bp", "uni265F", 0x265F, "BLACK CHESS PAWN"),
+)
+
+# All 44 rotated and turned White/Black chess pieces in the Unicode Chess
+# Symbols block (U+1FA06..U+1FA46), where Unicode defines rotation angles
+# clockwise from the standard upright orientation.
+_COMPONENT_GLYPHS: tuple[ComponentSpec, ...] = (
+    # Rotated 45 degrees clockwise (U+1FA06..U+1FA07).
+    ComponentSpec("u1FA06", 0x1FA06, "uni2658", 45.0, "WHITE CHESS KNIGHT ROTATED FORTY-FIVE DEGREES"),
+    ComponentSpec("u1FA07", 0x1FA07, "uni265E", 45.0, "BLACK CHESS KNIGHT ROTATED FORTY-FIVE DEGREES"),
+    # Rotated 90 degrees clockwise (U+1FA09..U+1FA14).
+    ComponentSpec("u1FA09", 0x1FA09, "uni2654", 90.0, "WHITE CHESS KING ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA0A", 0x1FA0A, "uni2655", 90.0, "WHITE CHESS QUEEN ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA0B", 0x1FA0B, "uni2656", 90.0, "WHITE CHESS ROOK ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA0C", 0x1FA0C, "uni2657", 90.0, "WHITE CHESS BISHOP ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA0D", 0x1FA0D, "uni2658", 90.0, "WHITE CHESS KNIGHT ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA0E", 0x1FA0E, "uni2659", 90.0, "WHITE CHESS PAWN ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA0F", 0x1FA0F, "uni265A", 90.0, "BLACK CHESS KING ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA10", 0x1FA10, "uni265B", 90.0, "BLACK CHESS QUEEN ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA11", 0x1FA11, "uni265C", 90.0, "BLACK CHESS ROOK ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA12", 0x1FA12, "uni265D", 90.0, "BLACK CHESS BISHOP ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA13", 0x1FA13, "uni265E", 90.0, "BLACK CHESS KNIGHT ROTATED NINETY DEGREES"),
+    ComponentSpec("u1FA14", 0x1FA14, "uni265F", 90.0, "BLACK CHESS PAWN ROTATED NINETY DEGREES"),
+    # Rotated 135 degrees clockwise (U+1FA1B..U+1FA1C).
+    ComponentSpec("u1FA1B", 0x1FA1B, "uni2658", 135.0, "WHITE CHESS KNIGHT ROTATED ONE HUNDRED THIRTY-FIVE DEGREES"),
+    ComponentSpec("u1FA1C", 0x1FA1C, "uni265E", 135.0, "BLACK CHESS KNIGHT ROTATED ONE HUNDRED THIRTY-FIVE DEGREES"),
+    # Turned / rotated 180 degrees (U+1FA1E..U+1FA29).
+    ComponentSpec("u1FA1E", 0x1FA1E, "uni2654", 180.0, "WHITE CHESS TURNED KING"),
+    ComponentSpec("u1FA1F", 0x1FA1F, "uni2655", 180.0, "WHITE CHESS TURNED QUEEN"),
+    ComponentSpec("u1FA20", 0x1FA20, "uni2656", 180.0, "WHITE CHESS TURNED ROOK"),
+    ComponentSpec("u1FA21", 0x1FA21, "uni2657", 180.0, "WHITE CHESS TURNED BISHOP"),
+    ComponentSpec("u1FA22", 0x1FA22, "uni2658", 180.0, "WHITE CHESS TURNED KNIGHT"),
+    ComponentSpec("u1FA23", 0x1FA23, "uni2659", 180.0, "WHITE CHESS TURNED PAWN"),
+    ComponentSpec("u1FA24", 0x1FA24, "uni265A", 180.0, "BLACK CHESS TURNED KING"),
+    ComponentSpec("u1FA25", 0x1FA25, "uni265B", 180.0, "BLACK CHESS TURNED QUEEN"),
+    ComponentSpec("u1FA26", 0x1FA26, "uni265C", 180.0, "BLACK CHESS TURNED ROOK"),
+    ComponentSpec("u1FA27", 0x1FA27, "uni265D", 180.0, "BLACK CHESS TURNED BISHOP"),
+    ComponentSpec("u1FA28", 0x1FA28, "uni265E", 180.0, "BLACK CHESS TURNED KNIGHT"),
+    ComponentSpec("u1FA29", 0x1FA29, "uni265F", 180.0, "BLACK CHESS TURNED PAWN"),
+    # Rotated 225 degrees clockwise (U+1FA30..U+1FA31).
+    ComponentSpec("u1FA30", 0x1FA30, "uni2658", 225.0, "WHITE CHESS KNIGHT ROTATED TWO HUNDRED TWENTY-FIVE DEGREES"),
+    ComponentSpec("u1FA31", 0x1FA31, "uni265E", 225.0, "BLACK CHESS KNIGHT ROTATED TWO HUNDRED TWENTY-FIVE DEGREES"),
+    # Rotated 270 degrees clockwise (U+1FA33..U+1FA3E).
+    ComponentSpec("u1FA33", 0x1FA33, "uni2654", 270.0, "WHITE CHESS KING ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA34", 0x1FA34, "uni2655", 270.0, "WHITE CHESS QUEEN ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA35", 0x1FA35, "uni2656", 270.0, "WHITE CHESS ROOK ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA36", 0x1FA36, "uni2657", 270.0, "WHITE CHESS BISHOP ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA37", 0x1FA37, "uni2658", 270.0, "WHITE CHESS KNIGHT ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA38", 0x1FA38, "uni2659", 270.0, "WHITE CHESS PAWN ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA39", 0x1FA39, "uni265A", 270.0, "BLACK CHESS KING ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA3A", 0x1FA3A, "uni265B", 270.0, "BLACK CHESS QUEEN ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA3B", 0x1FA3B, "uni265C", 270.0, "BLACK CHESS ROOK ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA3C", 0x1FA3C, "uni265D", 270.0, "BLACK CHESS BISHOP ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA3D", 0x1FA3D, "uni265E", 270.0, "BLACK CHESS KNIGHT ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    ComponentSpec("u1FA3E", 0x1FA3E, "uni265F", 270.0, "BLACK CHESS PAWN ROTATED TWO HUNDRED SEVENTY DEGREES"),
+    # Rotated 315 degrees clockwise (U+1FA45..U+1FA46).
+    ComponentSpec("u1FA45", 0x1FA45, "uni2658", 315.0, "WHITE CHESS KNIGHT ROTATED THREE HUNDRED FIFTEEN DEGREES"),
+    ComponentSpec("u1FA46", 0x1FA46, "uni265E", 315.0, "BLACK CHESS KNIGHT ROTATED THREE HUNDRED FIFTEEN DEGREES"),
 )
 
 # Grade (GRAD) axis masters: https://fonts.google.com/knowledge/glossary/grade_axis
@@ -206,7 +279,7 @@ def _svg_to_ink_path(svg_path: Path) -> pathops.Path:
         )
         ink = pathops.op(ink, subpath, op, fix_winding=True)
 
-    ink.simplify(fix_winding=True, keep_starting_points=True)
+    ink.simplify(fix_winding=True)
     return ink
 
 
@@ -219,45 +292,37 @@ def _quad_to_cubic(p0: Point, q1: Point, p1: Point) -> tuple[Point, Point]:
 
 def _extract_cubic_contours(ink: pathops.Path) -> list[Contour]:
     """Extracts closed cubic contours from `ink`, elevating any quadratics."""
-    rec = RecordingPen()
-    ink.draw(rec)
-
     contours: list[Contour] = []
     start_pt: Point | None = None
     curr_pt: Point | None = None
     segments: list[CubicSegment] = []
 
-    for op, pts in rec.value:
-        if op == "moveTo":
-            start_pt = pts[0]
+    for cmd, args in svg_pathops.svg_commands(ink):
+        if cmd == "M":
+            start_pt = (args[0], args[1])
             curr_pt = start_pt
             segments = []
-        elif op == "lineTo":
+        elif cmd == "L":
             assert curr_pt is not None
-            end_pt = pts[0]
+            end_pt: Point = (args[0], args[1])
             if math.hypot(end_pt[0] - curr_pt[0], end_pt[1] - curr_pt[1]) > 1e-4:
                 segments.append(CubicSegment("line", None, None, end_pt))
                 curr_pt = end_pt
-        elif op == "qCurveTo":
+        elif cmd == "Q":
             assert curr_pt is not None
-            # Decompose implied on-curve midpoints if multiple off-curve points exist.
-            off_pts = pts[:-1]
-            final_pt = pts[-1]
-            for idx, q_pt in enumerate(off_pts):
-                if idx + 1 < len(off_pts):
-                    next_q = off_pts[idx + 1]
-                    seg_end = ((q_pt[0] + next_q[0]) * 0.5, (q_pt[1] + next_q[1]) * 0.5)
-                else:
-                    seg_end = final_pt
-                c1, c2 = _quad_to_cubic(curr_pt, q_pt, seg_end)
-                segments.append(CubicSegment("curve", c1, c2, seg_end))
-                curr_pt = seg_end
-        elif op == "curveTo":
-            assert curr_pt is not None
-            c1, c2, end_pt = pts[0], pts[1], pts[2]
+            q_pt: Point = (args[0], args[1])
+            end_pt = (args[2], args[3])
+            c1, c2 = _quad_to_cubic(curr_pt, q_pt, end_pt)
             segments.append(CubicSegment("curve", c1, c2, end_pt))
             curr_pt = end_pt
-        elif op in ("closePath", "endPath"):
+        elif cmd == "C":
+            assert curr_pt is not None
+            c1 = (args[0], args[1])
+            c2 = (args[2], args[3])
+            end_pt = (args[4], args[5])
+            segments.append(CubicSegment("curve", c1, c2, end_pt))
+            curr_pt = end_pt
+        elif cmd == "Z":
             if start_pt is not None and curr_pt is not None and segments:
                 if math.hypot(start_pt[0] - curr_pt[0], start_pt[1] - curr_pt[1]) > 1e-4:
                     segments.append(CubicSegment("line", None, None, start_pt))
@@ -347,7 +412,7 @@ def _reverse_contour(contour: Contour) -> Contour:
 def _normalize_and_classify_contours(
     contours: list[Contour],
 ) -> list[tuple[Contour, ContourCategory]]:
-    """Enforces PostScript winding (CW outer, CCW counter) and classifies contours."""
+    """Enforces PostScript winding (CCW outer, CW counter) and classifies contours."""
     polys = [_contour_polygon(c) for c in contours]
     areas = [_signed_area(p) for p in polys]
 
@@ -366,12 +431,13 @@ def _normalize_and_classify_contours(
 
         is_counter = (depth % 2) == 1
         signed_a = areas[idx]
-        # PostScript / Glyphs winding rule (+Y up):
-        # - Outer contours must be clockwise (signed_area < 0).
-        # - Inner counters must be counter-clockwise (signed_area > 0).
-        if not is_counter and signed_a > 0:
+        # PostScript / .glyphs source winding convention (+Y up):
+        # - Outer contours are counter-clockwise (signed_area > 0); fontc/fontmake
+        #   then flip them to clockwise when compiling TrueType (glyf) outlines.
+        # - Inner counters are clockwise (signed_area < 0).
+        if not is_counter and signed_a < 0:
             contour = _reverse_contour(contour)
-        elif is_counter and signed_a < 0:
+        elif is_counter and signed_a > 0:
             contour = _reverse_contour(contour)
 
         xs = [p[0] for p in polys[idx]]
@@ -440,10 +506,10 @@ def _grade_contour(
     anchors: list[Point] = [contour.start] + [seg.end for seg in contour.segments[:-1]]
 
     # Compute outward-pointing normal at each on-curve anchor.
-    # For a clockwise outer contour in +Y-up coordinates, the left-hand normal
-    # (-ty, tx) points outward from the filled black ink region.
-    # For a counter-clockwise inner counter, (-ty, tx) points inward into the
-    # hole (which also thickens the surrounding black stroke when grade_delta > 0).
+    # For a counter-clockwise outer contour in +Y-up coordinates, the right-hand
+    # normal (ty, -tx) points outward from the filled black ink region.
+    # For a clockwise inner counter, (ty, -tx) points inward into the hole
+    # (which also thickens the surrounding black stroke when grade_delta > 0).
     shifted_anchors: list[Point] = []
     for i, anchor in enumerate(anchors):
         prev_anchor = anchors[(i - 1) % n]
@@ -453,8 +519,8 @@ def _grade_contour(
         t_in = _incoming_tangent(prev_anchor, prev_seg)
         t_out = _outgoing_tangent(anchor, next_seg)
 
-        n_in = (-t_in[1], t_in[0])
-        n_out = (-t_out[1], t_out[0])
+        n_in = (t_in[1], -t_in[0])
+        n_out = (t_out[1], -t_out[0])
 
         avg_nx = n_in[0] + n_out[0]
         avg_ny = n_in[1] + n_out[1]
@@ -550,6 +616,33 @@ def _find_piece_svg(set_dir: Path, stem: str) -> Path:
     raise FileNotFoundError(f"Missing SVG for piece {stem!r} in {set_dir}")
 
 
+def _make_component(
+    base_glyph_name: str,
+    cw_degrees: float,
+    center: Point,
+) -> GSComponent:
+    """Creates a GSComponent rotated clockwise by `cw_degrees` around `center`."""
+    comp = GSComponent(base_glyph_name)
+    if cw_degrees % 360.0 != 0.0:
+        # In +Y-up font coordinates, a clockwise rotation by `cw_degrees` is a
+        # counter-clockwise rotation by `-cw_degrees`, normalized to (-180, 180].
+        theta_deg = (-cw_degrees) % 360.0
+        if theta_deg > 180.0:
+            theta_deg -= 360.0
+        theta_rad = math.radians(theta_deg)
+        cos_t = math.cos(theta_rad)
+        sin_t = math.sin(theta_rad)
+        cx, cy = center
+        dx = round(cx - (cx * cos_t - cy * sin_t), 2)
+        dy = round(cy - (cx * sin_t + cy * cos_t), 2)
+        comp.rotation = int(theta_deg) if theta_deg.is_integer() else theta_deg
+        comp.position = (
+            int(dx) if dx.is_integer() else dx,
+            int(dy) if dy.is_integer() else dy,
+        )
+    return comp
+
+
 def build_source_for_set(set_dir: Path, out_path: Path) -> None:
     """Compiles all 12 piece SVGs in `set_dir` into a Glyphs 3 file at `out_path`."""
     set_name = set_dir.name
@@ -558,29 +651,28 @@ def build_source_for_set(set_dir: Path, out_path: Path) -> None:
 
     font = GSFont()
     font.format_version = 3
-    font.family_name = _format_family_name(set_name)
-    font.units_per_em = _UPM
-
-    grad_axis = GSAxis(name="Grade", axis_tag="GRAD", hidden=False)
-    font.axes.append(grad_axis)
+    font.familyName = _format_family_name(set_name)
+    font.upm = _UPM
+    font.axes = [GSAxis(name="Grade", tag="GRAD", hidden=False)]
 
     for master_spec in _MASTERS:
         master = GSFontMaster()
         master.id = master_spec.master_id
         master.name = master_spec.name
-        master.axes_values = [master_spec.grade_value]
+        del master.customParameters["Master Name"]
+        master.axes = [master_spec.grade_value]
+        font.masters.append(master)
         master.ascender = _ASCENDER
         master.descender = _DESCENDER
-        master.cap_height = _CAP_HEIGHT
-        master.x_height = _X_HEIGHT
-        font.masters.append(master)
+        master.capHeight = _CAP_HEIGHT
+        master.xHeight = _X_HEIGHT
 
     # Always include .notdef as the first glyph with locked advance width.
     notdef = GSGlyph(".notdef")
     for master_spec in _MASTERS:
         layer = GSLayer()
-        layer.layer_id = master_spec.master_id
-        layer.associated_master_id = master_spec.master_id
+        layer.layerId = master_spec.master_id
+        layer.associatedMasterId = master_spec.master_id
         layer.width = _ADVANCE_WIDTH
         notdef.layers.append(layer)
     font.glyphs.append(notdef)
@@ -598,8 +690,8 @@ def build_source_for_set(set_dir: Path, out_path: Path) -> None:
 
         for master_spec in _MASTERS:
             layer = GSLayer()
-            layer.layer_id = master_spec.master_id
-            layer.associated_master_id = master_spec.master_id
+            layer.layerId = master_spec.master_id
+            layer.associatedMasterId = master_spec.master_id
             layer.width = _ADVANCE_WIDTH
 
             graded_contours = [
@@ -607,6 +699,26 @@ def build_source_for_set(set_dir: Path, out_path: Path) -> None:
                 for contour, category in classified
             ]
             _draw_contours_to_layer(graded_contours, layer)
+            glyph.layers.append(layer)
+
+        font.glyphs.append(glyph)
+
+    for comp_spec in _COMPONENT_GLYPHS:
+        glyph = GSGlyph(comp_spec.glyph_name)
+        glyph.unicode = f"{comp_spec.codepoint:04X}"
+
+        for master_spec in _MASTERS:
+            layer = GSLayer()
+            layer.layerId = master_spec.master_id
+            layer.associatedMasterId = master_spec.master_id
+            layer.width = _ADVANCE_WIDTH
+            layer.components.append(
+                _make_component(
+                    comp_spec.base_glyph,
+                    comp_spec.cw_degrees,
+                    glyph_center,
+                )
+            )
             glyph.layers.append(layer)
 
         font.glyphs.append(glyph)
@@ -645,7 +757,10 @@ def make_all_sources(
 
         print(f"Building {out_path} from {set_dir}...")
         build_source_for_set(set_dir, out_path)
-        print(f"  -> Wrote {out_path} ({len(_PIECES)} piece glyphs, {len(_MASTERS)} GRAD masters)")
+        print(
+            f"  -> Wrote {out_path} ({len(_PIECES)} base pieces, "
+            f"{len(_COMPONENT_GLYPHS)} component glyphs, {len(_MASTERS)} GRAD masters)"
+        )
 
 
 def main() -> None:
