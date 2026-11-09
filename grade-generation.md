@@ -1,9 +1,9 @@
 # Algorithmic `GRAD` Master Generation for Variable Chess Fonts
 
-This document details how [`scripts/make_source.py`](scripts/make_source.py) synthesizes point-compatible **Thin (`GRAD 100`)**, **Regular (`GRAD 400`)**, and **Thick (`GRAD 700`)** masters in Glyphs 3 (`.glyphs`) format from flat, multi-layered upstream SVG artwork.
+This document details how [`scripts/make_source.py`](scripts/make_source.py) synthesizes point-compatible **Thin (`GRAD 100`)**, **Regular (`GRAD 400`)**, and **Thick (`GRAD 900`)** masters in Glyphs 3 (`.glyphs`) format from flat, multi-layered upstream SVG artwork.
 
 The central engineering challenge is reconciling two competing requirements:
-1. **Visual fidelity across a wide grade excursion (`GRAD 100`–`700`)**: Upstream chess artwork combines broad solid silhouettes (`400–700` UPM across) with delicate interior cutouts and hatching strokes (`1.5px` in a `45 × 45` SVG `viewBox`, or `~33.3` UPM).
+1. **Visual fidelity across a wide grade excursion (`GRAD 100`–`900`)**: Upstream chess artwork combines broad solid silhouettes (`400–700` UPM across) with delicate interior cutouts and hatching strokes (`1.5px` in a `45 × 45` SVG `viewBox`, or `~33.3` UPM).
 2. **Strict multi-master point compatibility**: Every master layer for a glyph must share an isomorphic contour graph—identical contour count, contour ordering, winding direction, start-node index, segment count, and `line`/`curve` node types—so linear master interpolation produces clean outlines without topological kinks or self-intersecting loops.
 
 ---
@@ -17,8 +17,8 @@ Per [Google Fonts Knowledge: Grade (`GRAD`) axis](https://fonts.google.com/knowl
 | `unitsPerEm` (`upm`) | `1000` | Standard 1000-UPM coordinate grid |
 | Vertical metrics | `ascender = 800`, `descender = -200` | Full 1000-unit vertical em-box (`y ∈ [-200, 800]`); optical center at `(500, 300)` |
 | Advance width | `width = 1000` | Duplexed across all 56 glyphs and all 3 `GRAD` masters |
-| `GRAD` axis range | `100` – `700` (default `400`) | 3 masters: `Thin Grade` (`100`), `Regular Grade` (`400`), `Thick Grade` (`700`) |
-| Base offset delta (`δ`) | `-24.0` / `0.0` / `+26.0` UPM | Target outward normal displacement at `GRAD 100` / `400` / `700` |
+| `GRAD` axis range | `100` – `900` (default `400`) | 3 masters: `Thin Grade` (`100`), `Regular Grade` (`400`), `Thick Grade` (`900`) |
+| Base offset delta (`δ`) | `-26.0` / `0.0` / `+42.0` UPM | Target outward normal displacement at `GRAD 100` / `400` / `900` |
 
 ---
 
@@ -48,14 +48,14 @@ Because an OpenType outline source represents a single binary planar region (ink
     `ink = pathops.op(ink, shape_path, pathops.PathOp.DIFFERENCE)`
 - Under the hood, `skia-pathops` (Cary Clark, Google) constructs a planar arrangement of cubic/quadratic Bézier segments—a curved generalization of the Bentley–Ottmann sweep-line algorithm (Bentley & Ottmann, 1979) and Vatti clipping (Vatti, 1992)—computing exact curve–curve intersections, splitting segments at intersection parameters, and extracting minimal boundary cycles according to non-zero winding numbers.
 
-### 2.4 Overlap Removal & Exact Degree Elevation (`Q` → `C`)
+### 2.4 Overlap Removal, Micro-Segment Pruning & Exact Degree Elevation (`Q` → `C`)
 - Calling `ink.simplify(fix_winding=True)` removes any residual self-overlaps and normalizes contour winding.
 - [`_extract_cubic_contours`](scripts/make_source.py) then walks `svg_pathops.svg_commands(ink)` and converts any quadratic Bézier segments `(P₀, Q₁, P₂)` into exact degree-elevated cubics `(P₀, C₁, C₂, P₂)` using standard Bernstein basis degree elevation (Farin, *Curves and Surfaces for CAGD*):
   ```
   C₁ = P₀ + (2/3) × (Q₁ − P₀)
   C₂ = P₂ + (2/3) × (Q₁ − P₂)
   ```
-- Zero-length degenerate segments (`‖P_end − P_start‖ < 10⁻⁴` UPM) are pruned so downstream tangent and normal evaluations never divide by zero.
+- **Micro-segment and boolean-sliver pruning**: Boolean intersection splitting inside `skia-pathops` occasionally emits sub-unit `L` micro-steps (`0.5–0.8` UPM) at curve junctions or leaves `< 4.0` UPM² dust slivers where two stroke boundaries nearly coincide. If a `0.69`-UPM line segment in `GRAD 400` contracts by `75%` at `GRAD 900` (`0.17` UPM), downstream curve compilers drop it as a zero-length degenerate segment in `GRAD 900` while retaining it in `GRAD 400`, breaking path-element compatibility. [`_extract_cubic_contours`](scripts/make_source.py) absorbs `L` micro-steps shorter than `1.0` UPM (`0.5` UPM for curves) directly into the base `GRAD 400` contour, and [`_normalize_and_classify_contours`](scripts/make_source.py) discards degenerate contour slivers with `|A| < 4.0` UPM².
 
 ---
 
@@ -66,7 +66,7 @@ Glyphs 3 (`.glyphs`) sources follow cubic PostScript outline conventions in a `+
 - **Outer silhouettes** wind **counter-clockwise (CCW)**, yielding a positive signed area `A > 0`.
 - **Inner counters (cutouts)** wind **clockwise (CW)**, yielding a negative signed area `A < 0`.
 
-[`_contour_signed_area`](scripts/make_source.py) evaluates the signed area of each contour by sampling 4 points per cubic segment (`_contour_polygon`) and applying the shoelace formula:
+[`_signed_area`](scripts/make_source.py) evaluates the signed area of each contour by sampling 4 points per cubic segment (`_contour_polygon`) and applying the shoelace formula:
 ```
 A = (1/2) × Σᵢ (xᵢ × yᵢ₊₁ − xᵢ₊₁ × yᵢ)
 ```
@@ -74,18 +74,15 @@ A = (1/2) × Σᵢ (xᵢ × yᵢ₊₁ − xᵢ₊₁ × yᵢ)
 ### 3.2 Why Uniform Normal Offsetting Fails Typographically: 3-Way Contour Classification
 In classical type design and algorithmic weight generation—see Walter Tracy (*Letters of Credit*, 1986), Fred Smeijers (*Counterpunch*, 1996), and Tim Ahrens (*Size-specific adjustments to type designs* / RMX Scaler, 2007)—increasing weight or grade cannot move outer silhouettes and inner counters at identical rates:
 1. If an outer silhouette expands by `+δ` and an interior counter contracts by the full `+δ`, narrow negative spaces (such as the Black Bishop's mitre cross-slit or the parallel hatching ribs in `kmar-meridian`) rapidly choke and fill in, destroying internal contrast long before the outer silhouette looks bold.
-2. Conversely, tiny isolated positive contours (such as `25 × 25` UPM crown jewels or horse nostrils) have a total radius smaller than `|δ| = 24` UPM; offsetting them inward by `-24` UPM in `GRAD 100` would invert them through their own centers.
+2. Conversely, tiny isolated positive contours (such as `25 × 25` UPM crown jewels or horse nostrils) have a total radius smaller than `|δ| = 26` UPM; offsetting them inward by `-26` UPM in `GRAD 100` would invert them through their own centers.
 
-To solve both problems, [`_normalize_and_classify_contours`](scripts/make_source.py) partitions every contour into one of three geometric categories based on signed area `A` and bounding-box area `B = (x_max − x_min) × (y_max − y_min)` (with threshold `_SMALL_ACCENT_AREA_THRESHOLD = 4500.0` UPM²):
+To solve both problems, [`_normalize_and_classify_contours`](scripts/make_source.py) partitions every contour into one of three geometric categories based on nesting depth, signed area `A`, and bounding-box area `B = (x_max − x_min) × (y_max − y_min)` (with threshold `_ACCENT_AREA_THRESHOLD = 4500.0` UPM²):
 
 | Category | Classification Rule | Winding | Role & Offset Behavior |
 | :--- | :--- | :--- | :--- |
-| **Category A (`silhouette`)** | `A > 0` and `B ≥ 4500` UPM² | CCW (`A > 0`) | Primary outer piece boundary; receives full `1.0 × δ` outward normal offset |
-| **Category B (`counter`)** | `A < 0` (hole inside silhouette) | CW (`A < 0`) | Interior negative-space cutout; receives damped `-0.65 × δ` offset + minor-axis cap |
-| **Category C (`accent`)** | `A > 0` and `B < 4500` UPM² | CCW (`A > 0`) | Small isolated detail (jewel, dot); scaled radially around centroid + translated |
-
-### 3.3 Canonical Start-Node Anchoring
-After enforcing CCW/CW winding via [`_reverse_contour`](scripts/make_source.py), [`_canonicalize_contour_start`](scripts/make_source.py) cyclically rotates each contour's segment list so `contour.start` is anchored at the on-curve vertex minimizing `(round(y, 3), round(x, 3))` (bottom-most, then left-most). Because `GRAD 100` and `GRAD 700` are derived directly from the canonicalized `GRAD 400` contour list without re-sorting, start-node correspondence is guaranteed by construction.
+| **Category A (`silhouette`)** | `depth == 0`, or even `depth ≥ 2` with `B ≥ 4500` UPM² | CCW (`A > 0`) | Primary outer piece boundary (including detached crown pearls); receives `+1.0 × δ` horizontal, `+0.65 × δ` vertical offset |
+| **Category B (`counter`)** | Odd nesting depth (hole inside silhouette) | CW (`A < 0`) | Interior chamber (`minor_dim ≥ 60` UPM: `+0.65 × δ`) or narrow highlight slit (`minor_dim < 60` UPM: `min(0.25 × δ, 0.18 × minor_dim)` when thickening) |
+| **Category C (`accent`)** | Even nesting `depth ≥ 2` (island inside counter) and `B < 4500` UPM² | CCW (`A > 0`) | Small interior island (Bishop `+` cross, crown jewel, nostril); damped `0.25 × δ` dilation + radial shift |
 
 ---
 
@@ -105,83 +102,68 @@ Classical CAD and font-engineering offset algorithms handle these two properties
 - **Hoschek (1985, *"Offset curves in the plane"*, *CAD*)** and **Elber, Lee & Kim (1997, *"Comparing Offset Curve Approximation Methods"*, *IEEE CG&A*)**: Perform least-squares cubic spline fitting with adaptive knot insertion.
 - **Levien (2018–2024, `kurbo::offset` / *"Offsetting cubic Béziers"*)**: Analyzes curvature extrema and cusps, subdividing cubics at inflection and maximum-curvature points to maintain high geometric accuracy.
 
-While adaptive subdivision is ideal for generating a *static* font outline, it is **incompatible with variable font master synthesis**: running an adaptive offsetter at `δ = -24`, `δ = 0`, and `δ = +26` subdivides each master at different parameter values `t`, producing different numbers of cubic segments per contour across masters.
+While adaptive subdivision is ideal for generating a *static* font outline, it is **incompatible with variable font master synthesis**: running an adaptive offsetter at `δ = -26`, `δ = 0`, and `δ = +42` subdivides each master at different parameter values `t`, producing different numbers of cubic segments per contour across masters.
 
 ### 4.2 Fixed-Topology Control-Polygon Offset ([`_grade_contour`](scripts/make_source.py))
-To preserve a strict 1-to-1 bijection of `GSNode` sequences across `GRAD 100`, `400`, and `700`, [`_grade_contour`](scripts/make_source.py) operates as a **fixed-topology vertex-and-handle deformation** on the `GRAD 400` control graph, augmented with four geometric safeguards against cusp inversion and opposite-wall collision.
+To preserve a strict 1-to-1 bijection of `GSNode` sequences across `GRAD 100`, `400`, and `900`, [`_grade_contour`](scripts/make_source.py) operates as a **fixed-topology vertex-and-handle deformation** on the `GRAD 400` control graph, augmented with four geometric safeguards against cusp inversion and opposite-wall collision.
 
-#### Step 1: Category-Specific Displacement (`effective_delta`) & Minor-Axis Counter Clamping
+#### Step 1: Category-Specific Displacement & Chamber-vs-Slit Counter Scaling
 - **Category A (`silhouette`)**:
-  `effective_delta = +δ` (`-24.0` UPM at `GRAD 100`, `+26.0` UPM at `GRAD 700`).
+  `dx = δ × miter_scale × n_x`, `dy = 0.65 × δ × miter_scale × n_y` (`δ = -26.0` UPM at `GRAD 100`, `δ = +42.0` UPM at `GRAD 900`). Damping vertical silhouette expansion to `0.65 × δ` keeps piece crowns and bases comfortably within the `[-200, 800]` vertical em-box even at `GRAD 900`. Because `depth == 0` contours are always classified as `Category A` regardless of bounding-box area, detached exterior ornaments (such as the five hollow coronet pearls on `cburnett`'s White Queen) expand at the same rate as their interior counter holes instead of having their outer rings starved by `accent` damping.
 - **Category B (`counter`)**:
-  `effective_delta = -0.65 × δ` (`+15.6` UPM at `GRAD 100`, `-16.9` UPM at `GRAD 700`).
-  When contracting a counter (`effective_delta < 0` in `GRAD 700`), [`_grade_contour`](scripts/make_source.py) computes the counter's minor bounding-box dimension `minor_dim = min(bbox_width, bbox_height)` and clamps:
-  ```
-  |effective_delta| ≤ 0.34 × minor_dim   (_COUNTER_MINOR_AXIS_CLAMP_RATIO = 0.34)
-  ```
-  This global-per-contour cap prevents narrow elongated slits from collapsing more than `68%` (`2 × 34%`) of their minor width before local per-vertex raycast clamping even engages.
+  Because CW inner counters have right-hand normals `(ty, -tx)` pointing *into* the cutout hole (outward from black ink), positive `counter_delta` at `GRAD 900` pushes counter walls inward. However, chess fonts use `depth == 1` counters for two optically distinct purposes:
+  1. **Large hollow chambers inside White pieces (`minor_dim ≥ 60.0` UPM)**: Receive `counter_delta = min(0.65 × δ, 0.35 × minor_dim)` (`-16.9` UPM at `GRAD 100`, up to `+27.3` UPM at `GRAD 900`), strongly thickening the outer outline walls of hollow White pieces (`uni2654`–`uni2659`).
+  2. **Narrow highlight slits inside Black pieces (`minor_dim < 60.0` UPM)**: Solid Black pieces (`uni265A`–`uni265F`) rely on thin (`20–45` UPM) white negative-space slits for internal collar ribs, mitre crosses, and mane contours. Shrinking those slits by `+27.3` UPM at `GRAD 900` would choke them into indistinct blobs. Instead, narrow slits use `counter_delta = min(0.25 × δ, 0.18 × minor_dim)` when thickening (`δ > 0`) and `0.55 × δ` when thinning (`δ < 0`), preserving crisp internal highlights at `GRAD 900`.
 - **Category C (`accent`)**:
-  Small isolated contours are transformed via an affine similarity map around their centroid `(cx, cy)` with radial scale `s = clamp(1.0 + δ / 400.0, 0.55, 1.45)` and a radial pull `pull = -0.15 × δ` toward the glyph center `(500, 300)` so interior dots track the surrounding contour shift without distorting or vanishing.
+  Small interior islands (`depth ≥ 2`, `B < 4500` UPM²) receive a damped dilation `accent_delta = max(0.25 × δ, -0.32 × minor_dim)` combined with a radial shift `0.12 × δ` from the glyph center `(500, 300)` so interior islands track the surrounding contour shift without inverting.
 
 #### Step 2: On-Curve Vertex Miter Bisectors & Turn-Angle Clamping
 At each on-curve vertex `Vᵢ` joining incoming segment `Sᵢ₋₁` and outgoing segment `Sᵢ`:
 1. The unit incoming tangent `t_in` is evaluated from `Vᵢ − C₂(Sᵢ₋₁)` (falling back to the chord `Vᵢ − Vᵢ₋₁` if `‖Vᵢ − C₂(Sᵢ₋₁)‖ < 10⁻³` UPM).
 2. The unit outgoing tangent `t_out` is evaluated from `C₁(Sᵢ) − Vᵢ` (falling back to the chord `Vᵢ₊₁ − Vᵢ`).
-3. Rotating a unit tangent `(tx, ty)` by `-90°` (`(ty, -tx)`) yields the right-hand unit normal `n_in` and `n_out`. Because outer silhouettes wind CCW and inner counters wind CW, `(ty, -tx)` points *outward* from black ink on silhouettes and *inward* into the cutout hole on counters.
+3. Rotating a unit tangent `(tx, ty)` by `-90°` (`(ty, -tx)`) yields the right-hand unit normal `n_in` and `n_out`. Because outer silhouettes wind CCW and inner counters wind CW, `(ty, -tx)` points *outward* from black ink on both silhouettes and counters.
 4. By Tiller–Hanson control-polygon intersection, the exact offset lines of adjacent tangents intersect along the unit normal bisector:
    ```
    bᵢ = normalize(n_in + n_out)
-   miter_scale = 1 / dot(bᵢ, n_out) = 1 / cos(θᵢ / 2)
+   miter_scale = 1 / sin(turn_angle / 2)
    ```
-   where `θᵢ = arccos(dot(t_in, t_out))` is the exterior turn angle at `Vᵢ`.
-5. **Miter limit**: On acute corners (`θᵢ > 135°`, or interior corner angle `< 45°`, `_MIN_CORNER_ANGLE_RAD = π / 4`) such as Queen coronet spikes or Knight ear tips, `1 / cos(θᵢ / 2)` blows up toward infinity. We clamp `miter_scale ≤ 1.45` (`_MAX_MITER_SCALE = 1.45`), preventing spikes from shooting out of the em-box at `GRAD 700`.
+   where `turn_angle = π − arccos(dot(t_in, t_out))` is the interior corner angle at `Vᵢ`.
+5. **Miter limit**: On acute corners (`turn_angle < 45°`, `_MIN_CORNER_ANGLE_RAD = π / 4`) such as Queen coronet spikes or Knight ear tips, `1 / sin(turn_angle / 2)` blows up toward infinity. We clamp `miter_scale` to `0.65` on `< 45°` spikes and cap general miters at `_MAX_MITER_SCALE = 1.6`, preventing spikes from shooting out of the em-box at `GRAD 900`.
 
 #### Step 3: Opposing-Wall Raycast Clearance Clamping (Directional Local Feature Size)
 In computational geometry, the **Medial Axis** (Blum, 1967) of a shape `Ω` is the locus of points having more than one closest point on the boundary `∂Ω`, and the directional thickness or **Shape Diameter Function** (Shapira, Shamir & Cohen-Or, 2008; applied to font analysis as "feeler rays" by Simon Cozens) measures the distance from a boundary point `Vᵢ` along its normal cone to the opposing boundary wall.
 
-Whenever an offset displacement exceeds half the directional distance to an opposing contour wall, the two walls cross over the medial axis and invert the local winding number. In `cburnett` and `kmar-meridian`, `1.5px` strokes measure `~33.3` UPM wide at `GRAD 400`, whereas `|δ| = 24.0` UPM at `GRAD 100` would move the two walls toward each other by `24.0 + 15.6 = 39.6` UPM (`> 33.3` UPM).
+Whenever an offset displacement exceeds half the directional distance to an opposing contour wall, the two walls cross over the medial axis and invert the local winding number. In `cburnett` and `kmar-meridian`, `1.5px` strokes measure `~33.3` UPM wide at `GRAD 400`, whereas `|δ| = 26.0` UPM at `GRAD 100` would move the two walls toward each other by `26.0 + 16.9 = 42.9` UPM (`> 33.3` UPM).
 
 To prevent medial-axis crossover without altering contour topology:
 1. [`_build_clearance_segments`](scripts/make_source.py) linearizes all contours in the glyph (sampling 4 sub-segments per cubic via `_contour_polygon`) into `ClearanceSegment(p0, p1, normal)` records, where `normal = (ty, -tx)` is the outward unit normal from black ink.
-2. For each vertex `Vᵢ` moving in unit direction `uᵢ = sign(effective_delta) × bᵢ`, [`_ray_opposing_clearance`](scripts/make_source.py) casts a 2D ray `R(t) = Vᵢ + t × uᵢ` (`t > 0.5` UPM) against all clearance segments whose outward normal opposes `Vᵢ`'s outward normal:
+2. For each vertex `Vᵢ` moving in unit direction `uᵢ = Δᵢ / ‖Δᵢ‖` across all contour categories (`silhouette`, `counter`, and `accent`), [`_ray_opposing_clearance`](scripts/make_source.py) casts a 2D ray `R(t) = Vᵢ + t × uᵢ` (`t > 2.0` UPM) against all clearance segments whose outward normal opposes `Vᵢ`'s outward normal:
    ```
-   dot(n_outward(Vᵢ), n_seg) < -0.25
+   dot(n_outward(Vᵢ), n_seg) ≤ -0.20
    ```
    and finds the minimum ray–segment intersection parameter `d_clear = min(t)`.
-3. The vertex displacement magnitude `|Δᵢ|` is then clamped to a safe share (`44%`) of the available clearance beyond a hard minimum floor:
-   - **When thinning (`effective_delta < 0`, ray travels through black ink toward the opposite wall of the stroke)**:
-     ```
-     |Δᵢ| ≤ max(0.0, (d_clear − 5.0) × 0.44)   (_MIN_STROKE_THICKNESS = 5.0 UPM)
-     ```
-     Even if both opposing walls saturate against this clamp simultaneously (`2 × 0.44 = 0.88 < 1.0`), at least `5.0` UPM of hairline ink remains between them.
-   - **When thickening (`effective_delta > 0`, ray travels across white negative space toward an opposing contour wall)**:
-     ```
-     |Δᵢ| ≤ max(0.0, (d_clear − 4.5) × 0.44)   (_MIN_GAP_CLEARANCE = 4.5 UPM)
-     ```
-     This prevents adjacent crenellations on the Rook, parallel hatching slits in `kmar-meridian`, or collar gaps from welding shut at `GRAD 700`.
+3. Each vertex's displacement magnitude `‖Δᵢ‖` is clamped to `_MAX_CLEARANCE_FRACTION × d_clear` (`0.40 × d_clear`):
+   - **When thinning (`GRAD 100`, ray travels through black ink toward the opposite wall of the stroke)**: Even when both opposing walls of a thin stroke saturate against `0.40 × d_clear` simultaneously, at least `20%` (`1.0 − 2 × 0.40`) of the original stroke thickness (`~6.7` UPM on a `33.3`-UPM stroke) remains as a clean hairline.
+   - **When thickening (`GRAD 900`, ray travels across white negative space toward an opposing contour wall)**: Capping each wall at `0.40 × d_clear` guarantees that at least `20%` of the original counter opening or inter-crenellation gap remains open, even at `δ = +42.0` UPM.
+4. For complex contours (`n > 6` on-curve vertices), two 3-point Laplacian smoothing passes (`[0.20, 0.60, 0.20]`) are applied to the clamped displacement vectors so adjacent vertices transition smoothly where local clearance clamps engage. Simple 4-node circular contours (`n ≤ 6`) skip Cartesian vector averaging because adjacent normals are `90°` orthogonal (`nᵢ₋₁ + nᵢ₊₁ = 0`), which would otherwise attenuate circular radial expansion by `0.60² = 0.36`.
 
 #### Step 4: Short-Chord Cusp / Bowtie Relaxation
 Raycasting protects against *opposing* walls colliding, but a single contour can also self-intersect locally when a short segment `Sᵢ` of chord length `Lᵢ = ‖Vᵢ₊₁ − Vᵢ‖` lies in a concave fillet of radius `R < |δ|` (the evolute cusp singularity). When `Vᵢ` and `Vᵢ₊₁` move along converging normals, the displaced chord vector `Cᵢ′ = (Vᵢ₊₁ + Δᵢ₊₁) − (Vᵢ + Δᵢ)` reverses direction relative to the original chord `Cᵢ = Vᵢ₊₁ − Vᵢ`, forming a local bowtie loop.
 
-[`_grade_contour`](scripts/make_source.py) runs two iterative relaxation passes over all adjacent vertex pairs `(Vᵢ, Vᵢ₊₁)`. Whenever the projected displaced chord falls below `25%` of its original length along `Cᵢ`:
+[`_grade_contour`](scripts/make_source.py) runs three iterative relaxation passes over all adjacent vertex pairs `(Vᵢ, Vᵢ₊₁)`. Whenever the projected displaced chord falls below `25%` (`_MIN_CHORD_PROJECTION = 0.25`) of its original length along `Cᵢ`:
 ```
-dot(Cᵢ′, Cᵢ) < 0.25 × ‖Cᵢ‖²
+1.0 + dot(Cᵢ, Δᵢ₊₁ − Δᵢ) / ‖Cᵢ‖² < 0.25
 ```
-both endpoint displacements `Δᵢ` and `Δᵢ₊₁` are damped toward their mean displacement `M = 0.5 × (Δᵢ + Δᵢ₊₁)`:
-```
-Δᵢ   ← M + k × (Δᵢ   − M)
-Δᵢ₊₁ ← M + k × (Δᵢ₊₁ − M)
-```
-where `k ∈ [0, 1)` is chosen so `dot(Cᵢ′, Cᵢ) = 0.25 × ‖Cᵢ‖²`. This eliminates local cusp inversions while keeping vertex positions smooth.
+both endpoint displacements `Δᵢ` and `Δᵢ₊₁` are blended toward their midpoint displacement `M = 0.5 × (Δᵢ + Δᵢ₊₁)` so the chord translates without shrinking below `25%` of its `GRAD 400` length.
 
 #### Step 5: Chord-Proportional Cubic Handle Scaling (Hobby / Tiller–Hanson Heuristic)
 Once the displaced on-curve endpoints `P₀′ = P₀ + Δᵢ` and `P₃′ = P₃ + Δᵢ₊₁` of a cubic segment `(P₀, P₁, P₂, P₃)` are fixed, placing the off-curve control points `P₁′` and `P₂′` requires preserving both endpoint G¹ tangent continuity and approximate curvature scaling:
 1. If `P₁` and `P₂` are merely translated by their endpoint deltas (`P₁ + Δᵢ`, `P₂ + Δᵢ₊₁`), a concave curve whose chord `‖P₃′ − P₀′‖` shrinks by `50%` retains its full original handle lengths `‖P₁ − P₀‖` and `‖P₂ − P₃‖`. In Bernstein form, when `‖P₁ − P₀‖ + ‖P₂ − P₃‖ > ‖P₃′ − P₀′‖`, the off-curve handles cross over each other and introduce an unwanted inflection or loop inside the cubic span (Hobby, 1986, *"Smooth, easy to compute interpolating splines"*).
-2. Instead, [`_grade_contour`](scripts/make_source.py) scales each handle vector `h₁ = P₁ − P₀` and `h₂ = P₂ − P₃` proportionally to the endpoint chord ratio `s_chord`:
+2. Instead, [`_grade_contour`](scripts/make_source.py) scales each handle vector `h₁ = P₁ − P₀` and `h₂ = P₂ − P₃` proportionally to the endpoint chord ratio `ratio`:
    ```
-   s_chord = clamp(‖P₃′ − P₀′‖ / ‖P₃ − P₀‖, 0.35, 1.55)
-   P₁′ = P₀′ + s_chord × (P₁ − P₀)
-   P₂′ = P₃′ + s_chord × (P₂ − P₃)
+   ratio = clamp(‖P₃′ − P₀′‖ / ‖P₃ − P₀‖, 0.25, 2.50)
+   P₁′ = P₀′ + ratio × (P₁ − P₀)
+   P₂′ = P₃′ + ratio × (P₂ − P₃)
    ```
    Because `P₁′ − P₀′` is a positive scalar multiple of `P₁ − P₀`, the tangent direction at `P₀′` (and symmetrically at `P₃′`) is strictly preserved, while handle velocity scales linearly with arc length—matching the analytical offset scaling `R′ / R = (R ± δ) / R` of circular arcs.
 
@@ -196,7 +178,7 @@ In a `+Y`-up coordinate system, a clockwise rotation by `cw_degrees` corresponds
 dx = cx − (cx × cos θ − cy × sin θ)
 dy = cy − (cx × sin θ + cy × cos θ)
 ```
-Because `(θ, dx, dy)` is invariant across `GRAD 100`, `400`, and `700`, the rotated symbols require zero outline duplication and inherit all `GRAD` outline interpolation directly from the 12 base piece glyphs (`U+2654`–`U+265F`).
+Because `(θ, dx, dy)` is invariant across `GRAD 100`, `400`, and `900`, the rotated symbols require zero outline duplication and inherit all `GRAD` outline interpolation directly from the 12 base piece glyphs (`U+2654`–`U+265F`).
 
 ---
 
@@ -207,8 +189,8 @@ During the design of [`scripts/make_source.py`](scripts/make_source.py), five al
 ### A.1 Independent Per-Master Boolean Buffering (`skia-pathops` / Clipper / Polygon Offsetting)
 - **Idea**: Take the resolved `GRAD 400` `pathops.Path`, offset every contour by `±δ` using a general stroke-expansion library (`picosvg` stroke expansion, `ClipperOffset`, or `kurbo` adaptive offset), and run `pathops.simplify()` on each master independently to clean up self-intersections.
 - **Why it fails**:
-  1. **Topological genus changes**: At `δ = +26`, narrow counters pinch into two separate holes or vanish entirely (`N_contours(700) ≠ N_contours(400)`). At `δ = -24`, thin necks pinch through, splitting one outer silhouette into two islands.
-  2. **Adaptive segment count mismatch**: Even when contour count is preserved, adaptive cubic fitting inserts extra on-curve nodes on tight curves at `GRAD 700` that do not exist at `GRAD 400` or `GRAD 100`.
+  1. **Topological genus changes**: At `δ = +42`, narrow counters pinch into two separate holes or vanish entirely (`N_contours(900) ≠ N_contours(400)`). At `δ = -26`, thin necks pinch through, splitting one outer silhouette into two islands.
+  2. **Adaptive segment count mismatch**: Even when contour count is preserved, adaptive cubic fitting inserts extra on-curve nodes on tight curves at `GRAD 900` that do not exist at `GRAD 400` or `GRAD 100`.
   3. **Start-node drift**: Boolean simplification re-indexes contour start vertices based on sweep-line event order, causing contours to twist by 1–3 segments during interpolation.
 
 ### A.2 Centroid-Based Radial Scaling of Outer and Inner Contours
@@ -220,11 +202,11 @@ During the design of [`scripts/make_source.py`](scripts/make_source.py), five al
 - **Why it fails**: Works cleanly only for small excursions (`|δ| ≤ 10` UPM). Beyond `δ ≈ -17` UPM, the `33.3`-UPM (`1.5px`) strokes in `cburnett` and `kmar-meridian` invert through each other (`1.65 × 17 = 28.05` UPM, plus miter amplification at corners), producing inside-out loops. Beyond `δ ≈ +16` UPM, narrow mitre and hatching slits (`18–22` UPM wide) cross over and invert into black-on-black artifacts.
 
 ### A.4 Post-Offset `pathops.simplify()` Cleanup Pass
-- **Idea**: Run fixed-topology vertex offsetting to generate `GRAD 100` and `GRAD 700`, and then pass the resulting contours through `pathops.simplify()` to snip off any local bowtie self-intersections.
+- **Idea**: Run fixed-topology vertex offsetting to generate `GRAD 100` and `GRAD 900`, and then pass the resulting contours through `pathops.simplify()` to snip off any local bowtie self-intersections.
 - **Why it fails**: Whenever `simplify()` removes a self-intersecting loop, it deletes the 2–4 nodes that formed the loop and merges the crossing segments at a newly created intersection vertex. That immediately changes the contour's node count relative to `GRAD 400`, making the master non-interpolable. Prevention (via raycast clearance clamping and chord relaxation *before* constructing the final nodes) is mandatory because post-hoc topological surgery is impossible in a fixed-node-graph variable font.
 
 ### A.5 Medial-Axis / Straight-Skeleton Extraction and Re-Stroking (METAFONT Paradigm)
-- **Idea**: Extract a 1D medial axis or straight skeleton (Aichholzer et al., 1995) from the `GRAD 400` ink region, associate a radius function `r(s)` along the skeleton, and reconstruct `GRAD 100` and `GRAD 700` as the envelope of disks of radius `r(s) + δ`.
+- **Idea**: Extract a 1D medial axis or straight skeleton (Aichholzer et al., 1995) from the `GRAD 400` ink region, associate a radius function `r(s)` along the skeleton, and reconstruct `GRAD 100` and `GRAD 900` as the envelope of disks of radius `r(s) + δ`.
 - **Why it fails**: Unlike uniform-stroke handwriting or simple sans-serif stems, pictorial chess glyphs mix massive variable-width silhouettes (the body of a Knight or Queen) with tiny angular cutouts. Medial axis transforms on complex 2D shapes are notoriously unstable with respect to small boundary perturbations, and reconstructing an envelope from a modified skeleton produces variable numbers of boundary vertices at 3-way branch junctions—again breaking point compatibility with the original `GRAD 400` outline.
 
 ---

@@ -465,7 +465,7 @@ def _normalize_and_classify_contours(
 
         if is_counter:
             category: ContourCategory = "counter"
-        elif bbox_area < _ACCENT_AREA_THRESHOLD:
+        elif depth >= 2 and bbox_area < _ACCENT_AREA_THRESHOLD:
             category = "accent"
         else:
             category = "silhouette"
@@ -588,10 +588,13 @@ def _grade_contour(
     # On-curve anchors: anchors[0] == contour.start, anchors[k] == segments[k-1].end.
     anchors: list[Point] = [contour.start] + [seg.end for seg in contour.segments[:-1]]
 
-    # Per-contour bounding box minor dimension for counter collapse protection.
+    # Per-contour bounding box dimensions for counter collapse protection.
     xs = [p[0] for p in anchors]
     ys = [p[1] for p in anchors]
-    minor_dim = max(1e-3, min(max(xs) - min(xs), max(ys) - min(ys)))
+    bbox_w = max(xs) - min(xs)
+    bbox_h = max(ys) - min(ys)
+    minor_dim = max(1e-3, min(bbox_w, bbox_h))
+    bbox_area = bbox_w * bbox_h
 
     raw_displacements: list[Point] = []
     outward_normals: list[Point] = []
@@ -630,11 +633,17 @@ def _grade_contour(
             dx = grade_delta * miter_scale * nx
             dy = 0.65 * grade_delta * miter_scale * ny
         elif category == "counter":
-            # Category B: Inner counters damped and clamped to minor_dim so
-            # narrow interior slits never collapse at extreme Thick grade.
-            counter_delta = grade_delta * 0.65
-            if counter_delta > 0.0:
-                counter_delta = min(counter_delta, 0.35 * minor_dim)
+            # Category B: Distinguish large hollow chambers (White piece interiors)
+            # from narrow interior highlight slits (Black piece cutouts).
+            if minor_dim >= 60.0:
+                counter_delta = grade_delta * 0.65
+                if counter_delta > 0.0:
+                    counter_delta = min(counter_delta, 0.35 * minor_dim)
+            else:
+                if grade_delta > 0.0:
+                    counter_delta = min(grade_delta * 0.25, 0.18 * minor_dim)
+                else:
+                    counter_delta = grade_delta * 0.55
             dx = counter_delta * miter_scale * nx
             dy = counter_delta * miter_scale * ny
         else:
@@ -650,7 +659,7 @@ def _grade_contour(
 
         # Clamp displacement magnitude against opposing-wall raycast clearance.
         disp_mag = math.hypot(dx, dy)
-        if disp_mag > 1e-6 and category in ("silhouette", "counter"):
+        if disp_mag > 1e-6:
             dir_vec = (dx / disp_mag, dy / disp_mag)
             clearance = _ray_opposing_clearance(
                 anchor, dir_vec, (nx, ny), clearance_segs
@@ -663,10 +672,11 @@ def _grade_contour(
 
         raw_displacements.append((dx, dy))
 
-    # Smooth displacement vectors along the contour so adjacent anchors transition
-    # gradually when local clearance clamps kick in.
+    # Smooth displacement vectors along contours with > 6 nodes so adjacent
+    # anchors transition gradually when local clearance clamps kick in, while
+    # leaving 4-node circular contours unattenuated by 90-degree neighbor averaging.
     displacements = list(raw_displacements)
-    if n >= 3:
+    if n > 6:
         for _ in range(2):
             displacements = [
                 (

@@ -1,11 +1,18 @@
 # chess-font
 I was curious what's involved in creating a chess font :)
 
-For each major permissively licensed set of vector chess assets I could find we create a Unicode font using the standard Chess block:
+For each major permissively licensed set of vector chess assets I could find we create a Unicode font using the standard [Unicode chess symbols](https://en.wikipedia.org/wiki/Chess_symbols_in_Unicode) codepoints:
 * 12 base piece glyphs (`U+2654`–`U+265F`, Miscellaneous Symbols) across 3 duplexed `GRAD` masters (`100`, `400`, `900`)
 * 44 rotated/turned Unicode Chess Symbols (`U+1FA06`–`U+1FA46`) defined as transformed component references (`GSComponent`)
 
-Gemini did all the work, I just nudged it in the desired direction.
+We generate thinner and thicker variants of all glyphs,
+and place them in the font to form a 
+[grade axis](https://fonts.google.com/knowledge/glossary/grade_axis)
+where min/max are generated and default is the original artwork.
+
+Gemini did all the work, I just nudged it in the desired direction a few times.
+
+![Grade Contact Sheet](./docs/grade-contact-sheet.svg)
 
 [Live Demo (GitHub Pages)](https://rsheeter.github.io/chess-font/)
 
@@ -22,10 +29,11 @@ $ pip install -r scripts/requirements.txt
 1. `python3 scripts/vendor_glyphs.py` - update `third_party/` vendored SVG assets and [`third_party/README.md`](third_party/README.md)
 2. `python3 scripts/make_source.py` - establish `sources/<set>.glyphs` for each vendored SVG set
     * Generates grade variants as described in [./grade-generation.md](./grade-generation.md)
-3. Edit in Glyphs
+3. `python3 scripts/make_contact_sheet.py` - render the transparent-background `GRAD` contact sheet ([`docs/grade-contact-sheet.svg`](docs/grade-contact-sheet.svg), or pass `--png` on macOS to also rasterize a `2400px` PNG via `qlmanage`)
+4. Edit in Glyphs
     * _In theory, currently just uses generated glyphs_
-4. `python3 scripts/build_fonts.py` - download the latest [`googlefonts/fontc`](https://github.com/googlefonts/fontc) release binary for the current OS/arch and compile `sources/<set>.glyphs` into `build/fonts/<set>.ttf`
-5. Test the [`docs/index.html`](docs/index.html) demo page locally (deployed automatically to GitHub Pages via [`.github/workflows/pages.yml`](.github/workflows/pages.yml)):
+5. `python3 scripts/build_fonts.py` - download the latest [`googlefonts/fontc`](https://github.com/googlefonts/fontc) release binary for the current OS/arch and compile `sources/<set>.glyphs` into `build/fonts/<set>.ttf`
+6. Test the [`docs/index.html`](docs/index.html) demo page locally (deployed automatically to GitHub Pages via [`.github/workflows/pages.yml`](.github/workflows/pages.yml)):
     ```shell
     $ python3 scripts/build_fonts.py --dest docs/fonts
     $ python3 -m http.server -d docs 8000
