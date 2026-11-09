@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>chess-font — Unicode Chess Glyph Comparison</title>
+  <style>
+    @font-face {
+      font-family: "Chess Cburnett";
+      src: url("./fonts/cburnett.ttf") format("truetype");
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "Chess Kmar Livius";
+      src: url("./fonts/kmar-livius.ttf") format("truetype");
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "Chess Kmar Meridian";
+      src: url("./fonts/kmar-meridian.ttf") format("truetype");
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "Chess Lichess Merida";
+      src: url("./fonts/lichess-merida.ttf") format("truetype");
+      font-display: swap;
+    }
+
+    :root {
+      color-scheme: light dark;
+      --grad: 400;
+      --bg: Canvas;
+      --fg: CanvasText;
+      --border: color-mix(in srgb, CanvasText 16%, Canvas);
+      --header-bg: color-mix(in srgb, CanvasText 6%, Canvas);
+      --row-hover: color-mix(in srgb, CanvasText 4%, Canvas);
+      --muted: color-mix(in srgb, CanvasText 65%, Canvas);
+    }
+
+    body {
+      margin: 0;
+      padding: 1.5rem;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.4;
+    }
+
+    header {
+      max-width: 72rem;
+      margin: 0 auto 1.25rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.4rem;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.9rem;
+    }
+
+    .controls output {
+      font-variant-numeric: tabular-nums;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      min-width: 3ch;
+    }
+
+    .table-wrap {
+      max-width: 72rem;
+      margin: 0 auto;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: center;
+    }
+
+    th,
+    td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: var(--header-bg);
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    tbody tr:hover {
+      background: var(--row-hover);
+    }
+
+    td.meta {
+      text-align: left;
+      font-size: 0.82rem;
+    }
+
+    .codepoint {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: 600;
+      display: block;
+    }
+
+    .char-name {
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+
+    td.glyph {
+      font-size: 2.5rem;
+      line-height: 1.1;
+      font-variation-settings: "GRAD" var(--grad);
+    }
+
+    .font-system {
+      font-family: system-ui, -apple-system, "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", sans-serif;
+      font-variation-settings: normal;
+    }
+    .font-cburnett {
+      font-family: "Chess Cburnett", sans-serif;
+    }
+    .font-kmar-livius {
+      font-family: "Chess Kmar Livius", sans-serif;
+    }
+    .font-kmar-meridian {
+      font-family: "Chess Kmar Meridian", sans-serif;
+    }
+    .font-lichess-merida {
+      font-family: "Chess Lichess Merida", sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1><a href="https://github.com/rsheeter/chess-font">chess-font</a> — Unicode Chess Glyph Comparison</h1>
+    </div>
+    <div class="controls">
+      <label for="grad-slider">Grade (<code>GRAD</code>):</label>
+      <input id="grad-slider" type="range" min="100" max="700" step="10" value="400">
+      <output id="grad-value" for="grad-slider">400</output>
+      <a href="https://github.com/rsheeter/chess-font">Source on GitHub</a>
+    </div>
+  </header>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align: left;">Unicode Character</th>
+          <th>OS / System</th>
+          <th>cburnett</th>
+          <th>kmar-livius</th>
+          <th>kmar-meridian</th>
+          <th>lichess-merida</th>
+        </tr>
+      </thead>
+      <tbody id="glyph-rows"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const GLYPHS = [
+      // Standard Unicode Miscellaneous Symbols chess block (U+2654..U+265F)
+      [0x2654, "WHITE CHESS KING"],
+      [0x2655, "WHITE CHESS QUEEN"],
+      [0x2656, "WHITE CHESS ROOK"],
+      [0x2657, "WHITE CHESS BISHOP"],
+      [0x2658, "WHITE CHESS KNIGHT"],
+      [0x2659, "WHITE CHESS PAWN"],
+      [0x265A, "BLACK CHESS KING"],
+      [0x265B, "BLACK CHESS QUEEN"],
+      [0x265C, "BLACK CHESS ROOK"],
+      [0x265D, "BLACK CHESS BISHOP"],
+      [0x265E, "BLACK CHESS KNIGHT"],
+      [0x265F, "BLACK CHESS PAWN"],
+      // Rotated 45 degrees clockwise (U+1FA06..U+1FA07)
+      [0x1FA06, "WHITE CHESS KNIGHT ROTATED FORTY-FIVE DEGREES"],
+      [0x1FA07, "BLACK CHESS KNIGHT ROTATED FORTY-FIVE DEGREES"],
+      // Rotated 90 degrees clockwise (U+1FA09..U+1FA14)
+      [0x1FA09, "WHITE CHESS KING ROTATED NINETY DEGREES"],
+      [0x1FA0A, "WHITE CHESS QUEEN ROTATED NINETY DEGREES"],
+      [0x1FA0B, "WHITE CHESS ROOK ROTATED NINETY DEGREES"],
+      [0x1FA0C, "WHITE CHESS BISHOP ROTATED NINETY DEGREES"],
+      [0x1FA0D, "WHITE CHESS KNIGHT ROTATED NINETY DEGREES"],
+      [0x1FA0E, "WHITE CHESS PAWN ROTATED NINETY DEGREES"],
+      [0x1FA0F, "BLACK CHESS KING ROTATED NINETY DEGREES"],
+      [0x1FA10, "BLACK CHESS QUEEN ROTATED NINETY DEGREES"],
+      [0x1FA11, "BLACK CHESS ROOK ROTATED NINETY DEGREES"],
+      [0x1FA12, "BLACK CHESS BISHOP ROTATED NINETY DEGREES"],
+      [0x1FA13, "BLACK CHESS KNIGHT ROTATED NINETY DEGREES"],
+      [0x1FA14, "BLACK CHESS PAWN ROTATED NINETY DEGREES"],
+      // Rotated 135 degrees clockwise (U+1FA1B..U+1FA1C)
+      [0x1FA1B, "WHITE CHESS KNIGHT ROTATED ONE HUNDRED THIRTY-FIVE DEGREES"],
+      [0x1FA1C, "BLACK CHESS KNIGHT ROTATED ONE HUNDRED THIRTY-FIVE DEGREES"],
+      // Turned / rotated 180 degrees (U+1FA1E..U+1FA29)
+      [0x1FA1E, "WHITE CHESS TURNED KING"],
+      [0x1FA1F, "WHITE CHESS TURNED QUEEN"],
+      [0x1FA20, "WHITE CHESS TURNED ROOK"],
+      [0x1FA21, "WHITE CHESS TURNED BISHOP"],
+      [0x1FA22, "WHITE CHESS TURNED KNIGHT"],
+      [0x1FA23, "WHITE CHESS TURNED PAWN"],
+      [0x1FA24, "BLACK CHESS TURNED KING"],
+      [0x1FA25, "BLACK CHESS TURNED QUEEN"],
+      [0x1FA26, "BLACK CHESS TURNED ROOK"],
+      [0x1FA27, "BLACK CHESS TURNED BISHOP"],
+      [0x1FA28, "BLACK CHESS TURNED KNIGHT"],
+      [0x1FA29, "BLACK CHESS TURNED PAWN"],
+      // Rotated 225 degrees clockwise (U+1FA30..U+1FA31)
+      [0x1FA30, "WHITE CHESS KNIGHT ROTATED TWO HUNDRED TWENTY-FIVE DEGREES"],
+      [0x1FA31, "BLACK CHESS KNIGHT ROTATED TWO HUNDRED TWENTY-FIVE DEGREES"],
+      // Rotated 270 degrees clockwise (U+1FA33..U+1FA3E)
+      [0x1FA33, "WHITE CHESS KING ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA34, "WHITE CHESS QUEEN ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA35, "WHITE CHESS ROOK ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA36, "WHITE CHESS BISHOP ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA37, "WHITE CHESS KNIGHT ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA38, "WHITE CHESS PAWN ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA39, "BLACK CHESS KING ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA3A, "BLACK CHESS QUEEN ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA3B, "BLACK CHESS ROOK ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA3C, "BLACK CHESS BISHOP ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA3D, "BLACK CHESS KNIGHT ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      [0x1FA3E, "BLACK CHESS PAWN ROTATED TWO HUNDRED SEVENTY DEGREES"],
+      // Rotated 315 degrees clockwise (U+1FA45..U+1FA46)
+      [0x1FA45, "WHITE CHESS KNIGHT ROTATED THREE HUNDRED FIFTEEN DEGREES"],
+      [0x1FA46, "BLACK CHESS KNIGHT ROTATED THREE HUNDRED FIFTEEN DEGREES"],
+    ];
+
+    const FONT_CLASSES = [
+      "font-system",
+      "font-cburnett",
+      "font-kmar-livius",
+      "font-kmar-meridian",
+      "font-lichess-merida",
+    ];
+
+    const tbody = document.getElementById("glyph-rows");
+    for (const [cp, name] of GLYPHS) {
+      const tr = document.createElement("tr");
+
+      const metaTd = document.createElement("td");
+      metaTd.className = "meta";
+      const cpSpan = document.createElement("span");
+      cpSpan.className = "codepoint";
+      cpSpan.textContent = "U+" + cp.toString(16).toUpperCase().padStart(4, "0");
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "char-name";
+      nameSpan.textContent = name;
+      metaTd.append(cpSpan, nameSpan);
+      tr.appendChild(metaTd);
+
+      const ch = String.fromCodePoint(cp);
+      for (const fontClass of FONT_CLASSES) {
+        const td = document.createElement("td");
+        td.className = "glyph " + fontClass;
+        td.textContent = ch;
+        tr.appendChild(td);
+      }
+
+      tbody.appendChild(tr);
+    }
+
+    const slider = document.getElementById("grad-slider");
+    const output = document.getElementById("grad-value");
+    slider.addEventListener("input", () => {
+      document.documentElement.style.setProperty("--grad", slider.value);
+      output.textContent = slider.value;
+    });
+  </script>
+</body>
+</html>
