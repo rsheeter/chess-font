@@ -41,8 +41,9 @@ _CAP_HEIGHT = 700
 _X_HEIGHT = 500
 _ADVANCE_WIDTH = 1000
 
+_MIN_GRADE = 100
 _DEFAULT_GRADE = 400
-_GRADE_RANGE = 300
+_MAX_GRADE = 900
 
 _SAFE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 _PX_UNIT_RE = re.compile(r"(\d)px\b")
@@ -202,14 +203,14 @@ _COMPONENT_GLYPHS: tuple[ComponentSpec, ...] = (
 #   dark backgrounds, positive grade on low-contrast or small sizes)
 #
 # We place the unmodified upstream SVG vectors at 400 (matching Regular weight)
-# and span +/- 300 units across three duplexed masters (100, 400, 700), all
-# locked to `_ADVANCE_WIDTH` (1000 UPM).
+# and span the full 100..900 scale across three duplexed masters (100, 400, 900),
+# all locked to `_ADVANCE_WIDTH` (1000 UPM).
 _MASTERS: tuple[MasterSpec, ...] = (
     MasterSpec(
         master_id="master-thin",
         name="Thin Grade",
-        grade_value=_DEFAULT_GRADE - _GRADE_RANGE,
-        grade_delta=-24.0,
+        grade_value=_MIN_GRADE,
+        grade_delta=-26.0,
     ),
     MasterSpec(
         master_id="master-regular",
@@ -220,8 +221,8 @@ _MASTERS: tuple[MasterSpec, ...] = (
     MasterSpec(
         master_id="master-thick",
         name="Thick Grade",
-        grade_value=_DEFAULT_GRADE + _GRADE_RANGE,
-        grade_delta=26.0,
+        grade_value=_MAX_GRADE,
+        grade_delta=42.0,
     ),
 )
 
@@ -319,26 +320,28 @@ def _extract_cubic_contours(ink: pathops.Path) -> list[Contour]:
         elif cmd == "L":
             assert curr_pt is not None
             end_pt: Point = (args[0], args[1])
-            if math.hypot(end_pt[0] - curr_pt[0], end_pt[1] - curr_pt[1]) > 1e-4:
+            if math.hypot(end_pt[0] - curr_pt[0], end_pt[1] - curr_pt[1]) > 1.0:
                 segments.append(CubicSegment("line", None, None, end_pt))
                 curr_pt = end_pt
         elif cmd == "Q":
             assert curr_pt is not None
             q_pt: Point = (args[0], args[1])
             end_pt = (args[2], args[3])
-            c1, c2 = _quad_to_cubic(curr_pt, q_pt, end_pt)
-            segments.append(CubicSegment("curve", c1, c2, end_pt))
-            curr_pt = end_pt
+            if math.hypot(end_pt[0] - curr_pt[0], end_pt[1] - curr_pt[1]) > 0.5:
+                c1, c2 = _quad_to_cubic(curr_pt, q_pt, end_pt)
+                segments.append(CubicSegment("curve", c1, c2, end_pt))
+                curr_pt = end_pt
         elif cmd == "C":
             assert curr_pt is not None
             c1 = (args[0], args[1])
             c2 = (args[2], args[3])
             end_pt = (args[4], args[5])
-            segments.append(CubicSegment("curve", c1, c2, end_pt))
-            curr_pt = end_pt
+            if math.hypot(end_pt[0] - curr_pt[0], end_pt[1] - curr_pt[1]) > 0.5:
+                segments.append(CubicSegment("curve", c1, c2, end_pt))
+                curr_pt = end_pt
         elif cmd == "Z":
             if start_pt is not None and curr_pt is not None and segments:
-                if math.hypot(start_pt[0] - curr_pt[0], start_pt[1] - curr_pt[1]) > 1e-4:
+                if math.hypot(start_pt[0] - curr_pt[0], start_pt[1] - curr_pt[1]) > 1.0:
                     segments.append(CubicSegment("line", None, None, start_pt))
                 else:
                     last = segments[-1]
@@ -432,6 +435,8 @@ def _normalize_and_classify_contours(
 
     result: list[tuple[Contour, ContourCategory]] = []
     for idx, contour in enumerate(contours):
+        if abs(areas[idx]) < 4.0:
+            continue
         sample_pt = polys[idx][0]
         # Count how many other contours strictly enclose `sample_pt`.
         depth = 0
@@ -586,7 +591,7 @@ def _grade_contour(
     # Per-contour bounding box minor dimension for counter collapse protection.
     xs = [p[0] for p in anchors]
     ys = [p[1] for p in anchors]
-    minor_dim = max(1.0, min(max(xs) - min(xs), max(ys) - min(ys)))
+    minor_dim = max(1e-3, min(max(xs) - min(xs), max(ys) - min(ys)))
 
     raw_displacements: list[Point] = []
     outward_normals: list[Point] = []
@@ -627,7 +632,7 @@ def _grade_contour(
         elif category == "counter":
             # Category B: Inner counters damped and clamped to minor_dim so
             # narrow interior slits never collapse at extreme Thick grade.
-            counter_delta = grade_delta * 0.45
+            counter_delta = grade_delta * 0.65
             if counter_delta > 0.0:
                 counter_delta = min(counter_delta, 0.35 * minor_dim)
             dx = counter_delta * miter_scale * nx
