@@ -2,7 +2,7 @@
 I was curious what's involved in creating a chess font :)
 
 For each major permissively licensed set of vector chess assets I could find we create a Unicode font using the standard Chess block:
-* 12 base piece glyphs (`U+2654`–`U+265F`, Miscellaneous Symbols) across 3 duplexed `GRAD` masters (`100`, `400`, `700`)
+* 12 base piece glyphs (`U+2654`–`U+265F`, Miscellaneous Symbols) across 3 duplexed `GRAD` masters (`100`, `400`, `900`)
 * 44 rotated/turned Unicode Chess Symbols (`U+1FA06`–`U+1FA46`) defined as transformed component references (`GSComponent`)
 
 Gemini did all the work, I just nudged it in the desired direction.
